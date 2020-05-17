@@ -3,11 +3,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Microsoft.CSharp.RuntimeBinder;
 using Microsoft.Extensions.Logging;
+using Swish.Sftp.KexAlgorithms;
 using Swish.Sftp.Packets;
 
 
@@ -15,12 +18,18 @@ namespace Swish.Sftp
 {
     public class Client
     {
+        private const string ServerProtocolVersion = "SSH-2.0-swishsftp_0.0.1";
+
         private static long nextClientId;
 
         private readonly Socket socket;
         private readonly ILogger logger;
 
+        private KexInit kexInitServerToClient = new KexInit();
+        private KexInit kexInitClientToServer;
+
         private ExchangeContext activeExchangeContext = new ExchangeContext();
+        private ExchangeContext pendingExchangeContext = new ExchangeContext();
 
         private int currentSentPacketNumber = -1;
         private int currentReceivedPacketNumber = -1;
@@ -28,6 +37,8 @@ namespace Swish.Sftp
         private bool protocolVersionExchangeComplete;
         private string protocolVersionExchange;
         private long totalBytesTransferred;
+
+        private byte[] sessionId;
 
 
         public Client(Socket socket, ILogger<Client> logger)
@@ -38,7 +49,17 @@ namespace Swish.Sftp
             Id = Interlocked.Increment(ref nextClientId).ToString();
             IsConnected = true;
 
-            Send("SSH-2.0-swishsftp_0.0.1\r\n");
+            // Set up the socket
+            const int socketBufferSize = 2 * Packets.Packet.MaxPacketSize;
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.SendBuffer, socketBufferSize);
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReceiveBuffer, socketBufferSize);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.NoDelay, true);
+
+            // TODO: Setting this seems to break things on my Mac!
+            // socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.DontLinger, true);
+
+            // Send our version stuffs
+            Send($"{ServerProtocolVersion}\r\n");
         }
 
 
@@ -78,7 +99,7 @@ namespace Swish.Sftp
                             logger.LogDebug("Received ProtocolVersionExchange: '{VersionExchange}'.", protocolVersionExchange);
                             ValidateProtocolVersionExchange();
 
-                            // TODO - send KexInit
+                            SendKexInit();
                         }
                     }
                     catch (Exception ex)
@@ -101,26 +122,30 @@ namespace Swish.Sftp
                         {
                             logger.LogDebug("Received packet: {Type}.", packet.PacketType);
 
-                            // TODO - handle the packet
+                            // Handle the packet
+                            HandlePacket(packet);
 
                             // Read next packet (if any)
                             packet = ReadPacket();
                         }
 
-                        // TODO - read and process a packet
-
                         // TODO - Consider re-exchanging keys
                     }
                     catch (SwishServerException ex)
                     {
-                        logger.LogError(ex, "Exception reading packet.");
+                        logger.LogError(ex.Message);
                         Disconnect(ex.Reason, ex.Message);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Exception reading/processing packet.");
+                        Disconnect(DisconnectReason.None, "Server exception.");
                         return;
                     }
                 }
             }
 
-            // TODO - implement poll!
             await Task.CompletedTask;
         }
 
@@ -181,8 +206,7 @@ namespace Swish.Sftp
 
             var payload = packet.GetBytes();
 
-            // TODO - Compress
-            // payload = activeExchangeContext.CompressionServerToClient.Compress(payload);
+            payload = activeExchangeContext.CompressionServerToClient.Compress(payload);
 
             uint blockSize = activeExchangeContext.CipherServerToClient.BlockSize;
 
@@ -194,8 +218,8 @@ namespace Swish.Sftp
 
             byte[] padding = new byte[paddingLength];
 
-            // TODO - fill padding with random goodness
-            // RandomNumberGenerator.Create().GetBytes(padding);
+            // Fill padding with random goodness
+            RandomNumberGenerator.Create().GetBytes(padding);
 
             uint packetLength = (uint)(payload.Length + paddingLength + 1);
 
@@ -361,12 +385,13 @@ namespace Swish.Sftp
             {
                 var type = (PacketType)reader.GetByte();
 
-                /*
                 if (Packet.PacketTypes.ContainsKey(type))
                 {
-                    // TODO
+                    Packet packet = Activator.CreateInstance(Packet.PacketTypes[type]) as Packet;
+                    packet.Load(reader);
+                    packet.PacketSequence = packetNumber;
+                    return packet;
                 }
-                */
 
                 logger.LogWarning("Unimplemented packet type: {Type}.", type);
 
@@ -391,6 +416,236 @@ namespace Swish.Sftp
         private uint GetReceivedPacketNumber()
         {
             return (uint)Interlocked.Increment(ref currentReceivedPacketNumber);
+        }
+
+
+        private void HandlePacket(Packet packet)
+        {
+            try
+            {
+                HandleSpecificPacket((dynamic)packet);
+            }
+            catch (RuntimeBinderException)
+            {
+                logger.LogWarning("Unhandled packet type: {Type}.", packet.PacketType);
+
+                Unimplemented unimplemented = new Unimplemented()
+                {
+                    RejectedPacketNumber = packet.PacketSequence
+                };
+
+                Send(unimplemented);
+            }
+        }
+
+
+        private void SendKexInit()
+        {
+            kexInitServerToClient.KexAlgorithms.AddRange(KeyInfo.SupportedKeyExchanges.Select(x => x.Name));
+            kexInitServerToClient.EncryptionAlgorithmsClientToServer.AddRange(KeyInfo.SupportedCiphers.Select(x => x.Name));
+            kexInitServerToClient.EncryptionAlgorithmsServerToClient.AddRange(KeyInfo.SupportedCiphers.Select(x => x.Name));
+            kexInitServerToClient.ServerHostKeyAlgorithms.AddRange(KeyInfo.SupportedHostKeyAlgorithms.Select(x => x.Name));
+            kexInitServerToClient.MacAlgorithmsClientToServer.AddRange(KeyInfo.SupportedMACAlgorithms.Select(x => x.Name));
+            kexInitServerToClient.MacAlgorithmsServerToClient.AddRange(KeyInfo.SupportedMACAlgorithms.Select(x => x.Name));
+            kexInitServerToClient.CompressionAlgorithmsClientToServer.AddRange(KeyInfo.SupportedCompressions.Select(x => x.Name));
+            kexInitServerToClient.CompressionAlgorithmsServerToClient.AddRange(KeyInfo.SupportedCompressions.Select(x => x.Name));
+
+            Send(kexInitServerToClient);
+        }
+
+
+        private void HandleSpecificPacket(KexInit packet)
+        {
+            logger.LogDebug("Processing KexInit packet.");
+
+            // TODO - handle re-exchange
+
+            // Keep track of the client-to-server packet
+            kexInitClientToServer = packet;
+
+            // Pick algorithms
+            pendingExchangeContext.KexAlgorithm = KeyInfo.PickKexAlgorithm(packet.KexAlgorithms);
+            pendingExchangeContext.HostKeyAlgorithm = KeyInfo.PickHostKeyAlgorithm(packet.ServerHostKeyAlgorithms);
+            pendingExchangeContext.CipherClientToServer = KeyInfo.PickCipher(packet.EncryptionAlgorithmsClientToServer, "Client-To-Server");
+            pendingExchangeContext.CipherServerToClient = KeyInfo.PickCipher(packet.EncryptionAlgorithmsServerToClient, "Server-To-Client");
+            pendingExchangeContext.MACAlgorithmClientToServer = KeyInfo.PickMACAlgorithm(packet.MacAlgorithmsClientToServer, "Client-To-Server");
+            pendingExchangeContext.MACAlgorithmServerToClient = KeyInfo.PickMACAlgorithm(packet.MacAlgorithmsServerToClient, "Server-To-Client");
+            pendingExchangeContext.CompressionClientToServer = KeyInfo.PickCompression(packet.CompressionAlgorithmsClientToServer, "Client-To-Server");
+            pendingExchangeContext.CompressionServerToClient = KeyInfo.PickCompression(packet.CompressionAlgorithmsServerToClient, "Server-To-Client");
+        }
+
+
+        private void HandleSpecificPacket(KexDHInit packet)
+        {
+            logger.LogDebug("Processing KexDHInit packet.");
+
+            if ((pendingExchangeContext == null) || (pendingExchangeContext.KexAlgorithm == null))
+            {
+                throw new SwishServerException(DisconnectReason.SSH_DISCONNECT_PROTOCOL_ERROR, "Server did not receive SSH_MSG_KEX_INIT as expected.");
+            }
+
+            // 1. C generates a random number x (1 &lt x &lt q) and computes e = g ^ x mod p.  C sends e to S.
+            // 2. S receives e.  It computes K = e^y mod p
+            byte[] sharedSecret = pendingExchangeContext.KexAlgorithm.DecryptKeyExchange(packet.ClientValue);
+
+            // 2. S generates a random number y (0 < y < q) and computes f = g ^ y mod p.
+            byte[] serverKeyExchange = pendingExchangeContext.KexAlgorithm.CreateKeyExchange();
+
+            byte[] hostKey = pendingExchangeContext.HostKeyAlgorithm.CreateKeyAndCertificatesData();
+
+            // H = hash(V_C || V_S || I_C || I_S || K_S || e || f || K)
+            byte[] exchangeHash = ComputeExchangeHash(
+                pendingExchangeContext.KexAlgorithm,
+                hostKey,
+                packet.ClientValue,
+                serverKeyExchange,
+                sharedSecret);
+
+            if (sessionId == null)
+            {
+                sessionId = exchangeHash;
+            }
+
+            // https://tools.ietf.org/html/rfc4253#section-7.2
+
+            // Initial IV client to server: HASH(K || H || "A" || session_id)
+            // (Here K is encoded as mpint and "A" as byte and session_id as raw
+            // data.  "A" means the single character A, ASCII 65).
+            byte[] clientCipherIV = ComputeEncryptionKey(
+                pendingExchangeContext.KexAlgorithm,
+                exchangeHash,
+                pendingExchangeContext.CipherClientToServer.BlockSize,
+                sharedSecret, 'A');
+
+            // Initial IV server to client: HASH(K || H || "B" || session_id)
+            byte[] serverCipherIV = ComputeEncryptionKey(
+                pendingExchangeContext.KexAlgorithm,
+                exchangeHash,
+                pendingExchangeContext.CipherServerToClient.BlockSize,
+                sharedSecret, 'B');
+
+            // Encryption key client to server: HASH(K || H || "C" || session_id)
+            byte[] clientCipherKey = ComputeEncryptionKey(
+                pendingExchangeContext.KexAlgorithm,
+                exchangeHash,
+                pendingExchangeContext.CipherClientToServer.KeySize,
+                sharedSecret, 'C');
+
+            // Encryption key server to client: HASH(K || H || "D" || session_id)
+            byte[] serverCipherKey = ComputeEncryptionKey(
+                pendingExchangeContext.KexAlgorithm,
+                exchangeHash,
+                pendingExchangeContext.CipherServerToClient.KeySize,
+                sharedSecret, 'D');
+
+            // Integrity key client to server: HASH(K || H || "E" || session_id)
+            byte[] clientHmacKey = ComputeEncryptionKey(
+                pendingExchangeContext.KexAlgorithm,
+                exchangeHash,
+                pendingExchangeContext.MACAlgorithmClientToServer.KeySize,
+                sharedSecret, 'E');
+
+            // Integrity key server to client: HASH(K || H || "F" || session_id)
+            byte[] serverHmacKey = ComputeEncryptionKey(
+                pendingExchangeContext.KexAlgorithm,
+                exchangeHash,
+                pendingExchangeContext.MACAlgorithmServerToClient.KeySize,
+                sharedSecret, 'F');
+
+            // Set all keys we just generated
+            pendingExchangeContext.CipherClientToServer.SetKey(clientCipherKey, clientCipherIV);
+            pendingExchangeContext.CipherServerToClient.SetKey(serverCipherKey, serverCipherIV);
+            pendingExchangeContext.MACAlgorithmClientToServer.SetKey(clientHmacKey);
+            pendingExchangeContext.MACAlgorithmServerToClient.SetKey(serverHmacKey);
+
+            // Send reply to client!
+            var reply = new KexDHReply
+            {
+                ServerHostKey = hostKey,
+                ServerValue = serverKeyExchange,
+                Signature = pendingExchangeContext.HostKeyAlgorithm.CreateSignatureData(exchangeHash)
+            };
+
+            Send(reply);
+
+#if false
+            Send(new NewKeys());
+#endif
+
+            // TODO - implement KexDHInit handling!
+        }
+
+
+        private byte[] ComputeExchangeHash(IKexAlgorithm kexAlgorithm, byte[] hostKeyAndCerts, byte[] clientExchangeValue, byte[] serverExchangeValue, byte[] sharedSecret)
+        {
+            // H = hash(V_C || V_S || I_C || I_S || K_S || e || f || K)
+            using (ByteWriter writer = new ByteWriter())
+            {
+                writer.WriteString(protocolVersionExchange);
+                writer.WriteString(ServerProtocolVersion);
+
+                writer.WriteBytes(kexInitClientToServer.GetBytes());
+                writer.WriteBytes(kexInitServerToClient.GetBytes());
+                writer.WriteBytes(hostKeyAndCerts);
+
+                writer.WriteMPInt(clientExchangeValue);
+                writer.WriteMPInt(serverExchangeValue);
+                writer.WriteMPInt(sharedSecret);
+
+                return kexAlgorithm.ComputeHash(writer.ToByteArray());
+            }
+        }
+
+
+        private byte[] ComputeEncryptionKey(IKexAlgorithm kexAlgorithm, byte[] exchangeHash, uint keySize, byte[] sharedSecret, char letter)
+        {
+            // K(X) = HASH(K || H || X || session_id)
+
+            // Prepare the buffer
+            byte[] keyBuffer = new byte[keySize];
+            int keyBufferIndex = 0;
+            int currentHashLength = 0;
+            byte[] currentHash = null;
+
+            // We can stop once we fill the key buffer
+            while (keyBufferIndex < keySize)
+            {
+                using (ByteWriter writer = new ByteWriter())
+                {
+                    // Write "K"
+                    writer.WriteMPInt(sharedSecret);
+
+                    // Write "H"
+                    writer.WriteRawBytes(exchangeHash);
+
+                    if (currentHash == null)
+                    {
+                        // If we haven't done this yet, add the "X" and session_id
+                        writer.WriteByte((byte)letter);
+                        writer.WriteRawBytes(sessionId);
+                    }
+                    else
+                    {
+                        // If the key isn't long enough after the first pass, we need to
+                        // write the current hash as described here:
+                        //      K1 = HASH(K || H || X || session_id)   (X is e.g., "A")
+                        //      K2 = HASH(K || H || K1)
+                        //      K3 = HASH(K || H || K1 || K2)
+                        //      ...
+                        //      key = K1 || K2 || K3 || ...
+                        writer.WriteRawBytes(currentHash);
+                    }
+
+                    currentHash = kexAlgorithm.ComputeHash(writer.ToByteArray());
+                }
+
+                currentHashLength = Math.Min(currentHash.Length, (int)(keySize - keyBufferIndex));
+                Array.Copy(currentHash, 0, keyBuffer, keyBufferIndex, currentHashLength);
+
+                keyBufferIndex += currentHashLength;
+            }
+
+            return keyBuffer;
         }
     }
 }

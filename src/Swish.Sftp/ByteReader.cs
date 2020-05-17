@@ -1,13 +1,17 @@
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 
 namespace Swish.Sftp
 {
     public class ByteReader : IDisposable
     {
+        private readonly char[] listSeparator = new char[] { ',' };
+
         private bool hasBeenDisposed;
         private MemoryStream stream;
 
@@ -53,6 +57,57 @@ namespace Swish.Sftp
             }
 
             return BitConverter.ToUInt32(data, 0);
+        }
+
+
+        public string GetString()
+        {
+            return GetString(Encoding.ASCII);
+        }
+
+
+        public string GetString(Encoding encoding)
+        {
+            int length = (int)GetUInt32();
+
+            if (length == 0)
+            {
+                return string.Empty;
+            }
+
+            return encoding.GetString(GetBytes(length));
+        }
+
+
+        public List<string> GetNameList()
+        {
+            return new List<string>(GetString().Split(listSeparator, StringSplitOptions.RemoveEmptyEntries));
+        }
+
+
+        public bool GetBoolean()
+        {
+            return GetByte() != 0;
+        }
+
+
+        public byte[] GetMPInt()
+        {
+            uint size = GetUInt32();
+
+            if (size == 0)
+            {
+                return new byte[1];
+            }
+
+            byte[] data = GetBytes((int)size);
+
+            if (data[0] == 0)
+            {
+                return data.Skip(1).ToArray();
+            }
+
+            return data;
         }
 
 
