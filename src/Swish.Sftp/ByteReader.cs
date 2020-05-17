@@ -22,6 +22,20 @@ namespace Swish.Sftp
         }
 
 
+        public bool IsEOF
+        {
+            get
+            {
+                if (hasBeenDisposed)
+                {
+                    throw new ObjectDisposedException("ByteReader");
+                }
+
+                return stream.Position == stream.Length;
+            }
+        }
+
+
         public byte GetByte()
         {
             if (hasBeenDisposed)

@@ -37,6 +37,7 @@ namespace Swish.Sftp
         private bool protocolVersionExchangeComplete;
         private string protocolVersionExchange;
         private long totalBytesTransferred;
+        private DateTime keyTimeout;
 
         private byte[] sessionId;
 
@@ -114,7 +115,6 @@ namespace Swish.Sftp
                 {
                     try
                     {
-                        // TODO - async? cancel token?
                         var packet = ReadPacket();
 
                         // TODO - will reading in a loop allow starvation of other clients?
@@ -158,7 +158,20 @@ namespace Swish.Sftp
             {
                 if (reason != DisconnectReason.None)
                 {
-                    // TODO - send disconnect message to client
+                    try
+                    {
+                        Disconnect disconnect = new Disconnect
+                        {
+                            Reason = reason,
+                            Description = message
+                        };
+
+                        Send(disconnect);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogInformation(ex, "{Id}: Exception sending disconnect to client.", Id);
+                    }
                 }
 
                 try
@@ -167,7 +180,7 @@ namespace Swish.Sftp
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug(ex, "{Id}: Exception shutting down socket.", Id);
+                    logger.LogInformation(ex, "{Id}: Exception shutting down socket.", Id);
                 }
 
                 IsConnected = false;
@@ -175,7 +188,6 @@ namespace Swish.Sftp
         }
 
 
-        // TODO - async? cancel token?
         private void Send(string message)
         {
             logger.LogDebug("Sending raw string: '{Content}'.", message.Trim());
@@ -183,7 +195,6 @@ namespace Swish.Sftp
         }
 
 
-        // TODO - async? cancel token?
         private void Send(byte[] message)
         {
             if (!IsConnected)
@@ -197,7 +208,6 @@ namespace Swish.Sftp
         }
 
 
-        // TODO - async? cancel token?
         private void Send(Packet packet)
         {
             logger.LogDebug("Sending {0} packet.", packet.PacketType);
@@ -236,7 +246,12 @@ namespace Swish.Sftp
             // Encrypt
             var encryptedPayload = activeExchangeContext.CipherServerToClient.Encrypt(payload);
 
-            // TODO - apply MAC
+            // Apply MAC, if we have one
+            if (activeExchangeContext.MACAlgorithmServerToClient != null)
+            {
+                byte[] mac = activeExchangeContext.MACAlgorithmServerToClient.ComputeHash(packet.PacketSequence, payload);
+                encryptedPayload = encryptedPayload.Concat(mac).ToArray();
+            }
 
             Send(encryptedPayload);
 
@@ -375,10 +390,24 @@ namespace Swish.Sftp
             uint packetNumber = GetReceivedPacketNumber();
 
             // Check the MAC, if we have one
-            // TODO - check MAC
+            if (activeExchangeContext.MACAlgorithmClientToServer != null)
+            {
+                byte[] clientMac = new byte[activeExchangeContext.MACAlgorithmClientToServer.DigestLength];
+                bytesRead = socket.Receive(clientMac);
+                if (bytesRead != activeExchangeContext.MACAlgorithmClientToServer.DigestLength)
+                {
+                    throw new SwishServerException(DisconnectReason.SSH_DISCONNECT_CONNECTION_LOST, "Failed to read from socket.");
+                }
+
+                var mac = activeExchangeContext.MACAlgorithmClientToServer.ComputeHash(packetNumber, fullPacket);
+                if (!clientMac.SequenceEqual(mac))
+                {
+                    throw new SwishServerException(DisconnectReason.SSH_DISCONNECT_MAC_ERROR, "MAC from client is invalid");
+                }
+            }
 
             // Decompress
-            // TODO - decompress
+            payload = activeExchangeContext.CompressionClientToServer.Decompress(payload);
 
             // Parse the packet
             using (var reader = new ByteReader(payload))
@@ -567,12 +596,85 @@ namespace Swish.Sftp
             };
 
             Send(reply);
-
-#if false
             Send(new NewKeys());
-#endif
+        }
 
-            // TODO - implement KexDHInit handling!
+
+        private void HandleSpecificPacket(NewKeys packet)
+        {
+            logger.LogDebug("Processing NewKeys packet.");
+
+            activeExchangeContext = pendingExchangeContext;
+            pendingExchangeContext = null;
+
+            // Reset re-exchange values
+            totalBytesTransferred = 0;
+            keyTimeout = DateTime.UtcNow.AddHours(1);
+        }
+
+
+        private void HandleSpecificPacket(ServiceRequest packet)
+        {
+            logger.LogDebug("Processing ServiceRequest packet, service='{Service}'.", packet.ServiceName);
+
+            switch (packet.ServiceName)
+            {
+                case "ssh-userauth":
+                    Send(new ServiceAccept
+                    {
+                        ServiceName = packet.ServiceName
+                    });
+                    break;
+
+                default:
+                    logger.LogWarning("Service '{Service}' is not yet implemented/supported.", packet.ServiceName);
+                    Disconnect(DisconnectReason.SSH_DISCONNECT_SERVICE_NOT_AVAILABLE, "Not a supported service.");
+                    break;
+            }
+        }
+
+
+        private void HandleSpecificPacket(UserAuthRequest packet)
+        {
+            logger.LogDebug("Processing UserAuthRequest packet, user='{User}', service='{Service}', method='{Method}'.", packet.UserName, packet.ServiceName, packet.MethodName);
+
+            // TODO - if this is the first user auth request, send a welcome banner
+
+            if (packet.MethodName == "none")
+            {
+                SendFail();
+            }
+            else if (packet.MethodName == "password")
+            {
+                // See https://tools.ietf.org/html/rfc4252#section-8
+
+                // TODO - HACK - simple auth scheme for testing
+                if ((packet.UserName == "foo") && (packet.Password == "bar"))
+                {
+                    Send(new UserAuthSuccess());
+                }
+                else
+                {
+                    SendFail();
+                }
+            }
+            else
+            {
+                SendFail();
+            }
+        }
+
+
+        private void SendFail()
+        {
+            var fail = new UserAuthFailure
+            {
+                PartialSuccess = false
+            };
+
+            fail.AuthTypesThatCanContinue.Add("password");
+
+            Send(fail);
         }
 
 

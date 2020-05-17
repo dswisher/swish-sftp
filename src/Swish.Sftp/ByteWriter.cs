@@ -105,6 +105,12 @@ namespace Swish.Sftp
         }
 
 
+        public void WriteBool(bool value)
+        {
+            WriteByte((byte)(value ? 1 : 0));
+        }
+
+
         public byte[] ToByteArray()
         {
             if (hasBeenDisposed)
