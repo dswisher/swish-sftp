@@ -34,6 +34,11 @@ namespace Swish.Sftp
         private int currentSentPacketNumber = -1;
         private int currentReceivedPacketNumber = -1;
 
+        private uint serverChannel;
+        private uint clientChannel;
+        private uint channelInitialWindowSize;
+        private uint channelMaximumPacketSize;
+
         private bool protocolVersionExchangeComplete;
         private string protocolVersionExchange;
         private long totalBytesTransferred;
@@ -170,7 +175,7 @@ namespace Swish.Sftp
                     }
                     catch (Exception ex)
                     {
-                        logger.LogInformation(ex, "{Id}: Exception sending disconnect to client.", Id);
+                        logger.LogInformation("{Id}: Exception sending disconnect to client: {Message}.", Id, ex.Message);
                     }
                 }
 
@@ -180,7 +185,7 @@ namespace Swish.Sftp
                 }
                 catch (Exception ex)
                 {
-                    logger.LogInformation(ex, "{Id}: Exception shutting down socket.", Id);
+                    logger.LogInformation("{Id}: Exception shutting down socket: {Message}.", Id, ex.Message);
                 }
 
                 IsConnected = false;
@@ -675,6 +680,99 @@ namespace Swish.Sftp
             fail.AuthTypesThatCanContinue.Add("password");
 
             Send(fail);
+        }
+
+
+        private void HandleSpecificPacket(Ignore packet)
+        {
+            logger.LogDebug("Processing Ignore packet...by ignoring it.");
+        }
+
+
+        private void HandleSpecificPacket(ChannelOpen packet)
+        {
+            logger.LogDebug("Processing ChannelOpen packet, channel type '{Type}', initial window {Window}, max packet {Size}.", packet.ChannelType, packet.InitialWindowSize, packet.MaximumPacketSize);
+
+            /*
+            var fail = new ChannelOpenFailure
+            {
+                RecipientChannel = packet.SenderChannel,
+                ReasonCode = 4,
+                Description = "Not yet implemented."
+            };
+
+            Send(fail);
+            */
+
+            serverChannel = 6;      // TODO - allocate channels?
+            clientChannel = packet.SenderChannel;
+            channelInitialWindowSize = packet.InitialWindowSize;
+            channelMaximumPacketSize = packet.MaximumPacketSize;
+
+            var success = new ChannelOpenConfirmation
+            {
+                RecipientChannel = clientChannel,
+                SenderChannel = serverChannel,
+                InitialWindowSize = channelInitialWindowSize,
+                MaximumPacketSize = channelMaximumPacketSize
+            };
+
+            Send(success);
+
+            // TODO - process channel open
+        }
+
+
+        private void HandleSpecificPacket(ChannelRequest packet)
+        {
+            logger.LogDebug("Processing ChannelRequest packet, channel {Channel}, request type '{Type}', want reply {Want}.", packet.RecipientChannel,
+                    packet.RequestType, packet.WantReply);
+
+            if (packet.RequestType == "env")
+            {
+                logger.LogDebug("   -> {Name} = '{Value}'.", packet.VariableName, packet.VariableValue);
+            }
+            else if (packet.RequestType == "subsystem")
+            {
+                logger.LogDebug("   -> subsystem name = '{Name}'.", packet.SubsystemName);
+
+                if (packet.WantReply)
+                {
+                    var success = new ChannelSuccess
+                    {
+                        RecipientChannel = clientChannel
+                    };
+
+                    Send(success);
+                }
+            }
+
+            // TODO - log a warning for unknown type?
+        }
+
+
+        private void HandleSpecificPacket(ChannelData packet)
+        {
+            logger.LogDebug("Processing ChannelData packet, channel {Channel}, len {Len}, fxp len {SLen}, Type {Type}.", packet.RecipientChannel,
+                    packet.Length, packet.FxpLength, packet.Type);
+
+            // TODO - SSH_FXP_INIT
+            if (packet.Type == 1)
+            {
+                logger.LogDebug("   -> version {Version}", packet.Version);
+
+                // TODO - clean up! This is horrible, but trying to get something working!
+                var data = new ChannelData
+                {
+                    RecipientChannel = clientChannel,
+                    Length = 9,
+                    FxpLength = 5,
+                    Type = 2,
+                    Version = 3
+                };
+
+                Send(data);
+            }
         }
 
 
