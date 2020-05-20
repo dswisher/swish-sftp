@@ -16,7 +16,7 @@ using Swish.Sftp.Packets;
 
 namespace Swish.Sftp
 {
-    public class Client
+    public class Client : IPacketSender
     {
         private const string ServerProtocolVersion = "SSH-2.0-swishsftp_0.0.1";
 
@@ -34,10 +34,8 @@ namespace Swish.Sftp
         private int currentSentPacketNumber = -1;
         private int currentReceivedPacketNumber = -1;
 
-        private uint serverChannel;
-        private uint clientChannel;
-        private uint channelInitialWindowSize;
-        private uint channelMaximumPacketSize;
+        private uint nextChannelId = 1;
+        private Dictionary<uint, Channel> channels = new Dictionary<uint, Channel>();
 
         private bool protocolVersionExchangeComplete;
         private string protocolVersionExchange;
@@ -193,27 +191,7 @@ namespace Swish.Sftp
         }
 
 
-        private void Send(string message)
-        {
-            logger.LogDebug("Sending raw string: '{Content}'.", message.Trim());
-            Send(Encoding.UTF8.GetBytes(message));
-        }
-
-
-        private void Send(byte[] message)
-        {
-            if (!IsConnected)
-            {
-                return;
-            }
-
-            totalBytesTransferred += message.Length;
-
-            socket.Send(message);
-        }
-
-
-        private void Send(Packet packet)
+        public void Send(Packet packet)
         {
             logger.LogDebug("Sending {0} packet.", packet.PacketType);
 
@@ -261,6 +239,26 @@ namespace Swish.Sftp
             Send(encryptedPayload);
 
             // TODO - Consider re-exchanging keys
+        }
+
+
+        private void Send(string message)
+        {
+            logger.LogDebug("Sending raw string: '{Content}'.", message.Trim());
+            Send(Encoding.UTF8.GetBytes(message));
+        }
+
+
+        private void Send(byte[] message)
+        {
+            if (!IsConnected)
+            {
+                return;
+            }
+
+            totalBytesTransferred += message.Length;
+
+            socket.Send(message);
         }
 
 
@@ -693,6 +691,7 @@ namespace Swish.Sftp
         {
             logger.LogDebug("Processing ChannelOpen packet, channel type '{Type}', initial window {Window}, max packet {Size}.", packet.ChannelType, packet.InitialWindowSize, packet.MaximumPacketSize);
 
+            // TODO - if we're low on memory, or they've opened too many channels, fail. Other cases?
             /*
             var fail = new ChannelOpenFailure
             {
@@ -704,22 +703,14 @@ namespace Swish.Sftp
             Send(fail);
             */
 
-            serverChannel = 6;      // TODO - allocate channels?
-            clientChannel = packet.SenderChannel;
-            channelInitialWindowSize = packet.InitialWindowSize;
-            channelMaximumPacketSize = packet.MaximumPacketSize;
+            Channel channel;
 
-            var success = new ChannelOpenConfirmation
+            lock (channels)
             {
-                RecipientChannel = clientChannel,
-                SenderChannel = serverChannel,
-                InitialWindowSize = channelInitialWindowSize,
-                MaximumPacketSize = channelMaximumPacketSize
-            };
-
-            Send(success);
-
-            // TODO - process channel open
+                // TODO - use a factory to create channels, to populate logger and whatever else it might need
+                channel = new Channel(this, logger, nextChannelId++, packet);
+                channels.Add(channel.ServerChannelId, channel);
+            }
         }
 
 
@@ -728,26 +719,7 @@ namespace Swish.Sftp
             logger.LogDebug("Processing ChannelRequest packet, channel {Channel}, request type '{Type}', want reply {Want}.", packet.RecipientChannel,
                     packet.RequestType, packet.WantReply);
 
-            if (packet.RequestType == "env")
-            {
-                logger.LogDebug("   -> {Name} = '{Value}'.", packet.VariableName, packet.VariableValue);
-            }
-            else if (packet.RequestType == "subsystem")
-            {
-                logger.LogDebug("   -> subsystem name = '{Name}'.", packet.SubsystemName);
-
-                if (packet.WantReply)
-                {
-                    var success = new ChannelSuccess
-                    {
-                        RecipientChannel = clientChannel
-                    };
-
-                    Send(success);
-                }
-            }
-
-            // TODO - log a warning for unknown type?
+            DispatchToChannel(packet, packet.RecipientChannel);
         }
 
 
@@ -756,22 +728,20 @@ namespace Swish.Sftp
             logger.LogDebug("Processing ChannelData packet, channel {Channel}, len {Len}, fxp len {SLen}, Type {Type}.", packet.RecipientChannel,
                     packet.Length, packet.FxpLength, packet.Type);
 
-            // TODO - SSH_FXP_INIT
-            if (packet.Type == 1)
+            DispatchToChannel(packet, packet.RecipientChannel);
+        }
+
+
+        private void DispatchToChannel(Packet packet, uint channelId)
+        {
+            // Look up the channel and dispatch
+            if (channels.ContainsKey(channelId))
             {
-                logger.LogDebug("   -> version {Version}", packet.Version);
-
-                // TODO - clean up! This is horrible, but trying to get something working!
-                var data = new ChannelData
-                {
-                    RecipientChannel = clientChannel,
-                    Length = 9,
-                    FxpLength = 5,
-                    Type = 2,
-                    Version = 3
-                };
-
-                Send(data);
+                channels[channelId].HandlePacket((dynamic)packet);
+            }
+            else
+            {
+                // TODO - what to do for a channel that does not exist?
             }
         }
 
