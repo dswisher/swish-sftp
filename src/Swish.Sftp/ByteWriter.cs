@@ -59,7 +59,7 @@ namespace Swish.Sftp
 
         public void WriteBytes(byte[] data)
         {
-            WriteUInt32((uint)data.Count());
+            WriteUInt32((uint)data.Length);
             WriteRawBytes(data);
         }
 

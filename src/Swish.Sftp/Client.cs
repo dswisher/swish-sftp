@@ -711,6 +711,8 @@ namespace Swish.Sftp
                 channel = new Channel(this, logger, nextChannelId++, packet);
                 channels.Add(channel.ServerChannelId, channel);
             }
+
+            channel.Init();
         }
 
 
@@ -725,8 +727,7 @@ namespace Swish.Sftp
 
         private void HandleSpecificPacket(ChannelData packet)
         {
-            logger.LogDebug("Processing ChannelData packet, channel {Channel}, len {Len}, fxp len {SLen}, Type {Type}.", packet.RecipientChannel,
-                    packet.Length, packet.FxpLength, packet.Type);
+            logger.LogDebug("Processing ChannelData packet, channel {Channel}.", packet.RecipientChannel);
 
             DispatchToChannel(packet, packet.RecipientChannel);
         }

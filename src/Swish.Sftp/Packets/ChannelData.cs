@@ -8,6 +8,9 @@ namespace Swish.Sftp.Packets
 
         public uint RecipientChannel { get; set; }
 
+        public byte[] Data { get; set; }
+
+        /*
         // public string Data { get; set; }
 
         // TODO - HACK - RFC 4254 specifies that the channel data is a string. But it looks like SFTP treats the data as binary...
@@ -18,12 +21,18 @@ namespace Swish.Sftp.Packets
         public byte[] RawData { get; set; }
 
         public uint Version { get; set; }
+        */
 
 
         public override void Load(ByteReader reader)
         {
             RecipientChannel = reader.GetUInt32();
 
+            var length = (int)reader.GetUInt32();
+
+            Data = reader.GetBytes(length);
+
+            /*
             Length = reader.GetUInt32();    // Length of the data area
             FxpLength = reader.GetUInt32(); // Length of the SFTP sub-area
             Type = reader.GetByte();
@@ -42,12 +51,16 @@ namespace Swish.Sftp.Packets
                     // TODO - extension data?
                 }
             }
+            */
         }
 
 
         protected override void InternalGetBytes(ByteWriter writer)
         {
             writer.WriteUInt32(RecipientChannel);
+            writer.WriteBytes(Data);
+
+            /*
             writer.WriteUInt32(Length);
             writer.WriteUInt32(FxpLength);
             writer.WriteByte(Type);
@@ -57,6 +70,7 @@ namespace Swish.Sftp.Packets
             {
                 writer.WriteUInt32(Version);
             }
+            */
         }
     }
 }
