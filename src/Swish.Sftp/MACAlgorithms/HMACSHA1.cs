@@ -5,6 +5,8 @@ namespace Swish.Sftp.MACAlgorithms
     {
         private System.Security.Cryptography.HMACSHA1 hmac;
 
+        public string Name { get { return "hmac-sha1"; } }
+
         // See https://tools.ietf.org/html/rfc4253#section-6.4
         public uint KeySize { get { return 20; } }
 

@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Microsoft.CSharp.RuntimeBinder;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Swish.Sftp.KexAlgorithms;
 using Swish.Sftp.Packets;
@@ -23,6 +24,7 @@ namespace Swish.Sftp
         private static long nextClientId;
 
         private readonly Socket socket;
+        private readonly SftpSettings settings;
         private readonly ILogger logger;
 
         private KexInit kexInitServerToClient = new KexInit();
@@ -45,13 +47,16 @@ namespace Swish.Sftp
         private byte[] sessionId;
 
 
-        public Client(Socket socket, ILogger<Client> logger)
+        public Client(IConfiguration config, Socket socket, ILogger<Client> logger)
         {
             this.socket = socket;
             this.logger = logger;
 
             Id = Interlocked.Increment(ref nextClientId).ToString();
             IsConnected = true;
+
+            // Load the settings
+            settings = config.GetSection("sftp").Get<SftpSettings>();
 
             // Set up the socket
             const int socketBufferSize = 2 * Packets.Packet.MaxPacketSize;
@@ -515,6 +520,17 @@ namespace Swish.Sftp
             {
                 throw new SwishServerException(DisconnectReason.SSH_DISCONNECT_PROTOCOL_ERROR, "Server did not receive SSH_MSG_KEX_INIT as expected.");
             }
+
+            // Set the host key
+            // TODO - better handling of missing config
+            var hostKeyAlgoName = pendingExchangeContext.HostKeyAlgorithm.Name;
+
+            if (!settings.HostKeyPaths.ContainsKey(hostKeyAlgoName))
+            {
+                throw new Exception(string.Format("HostKey path for algo '{0}' not found in configuration.", hostKeyAlgoName));
+            }
+
+            pendingExchangeContext.HostKeyAlgorithm.ImportKeyFromFile(settings.HostKeyPaths[hostKeyAlgoName]);
 
             // 1. C generates a random number x (1 &lt x &lt q) and computes e = g ^ x mod p.  C sends e to S.
             // 2. S receives e.  It computes K = e^y mod p

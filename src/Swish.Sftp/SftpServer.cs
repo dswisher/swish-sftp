@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 
@@ -22,19 +23,20 @@ namespace Swish.Sftp
 
 
         public SftpServer(ClientFactory clientFactory,
-                          ServerSettings settings,
+                          IConfiguration config,
                           ILogger<SftpServer> logger)
         {
             this.clientFactory = clientFactory;
-            this.settings = settings;
             this.logger = logger;
+
+            settings = config.GetSection("server").Get<ServerSettings>();
         }
 
 
         public async Task Run(CancellationToken cancellationToken)
         {
             // Start up
-            logger.LogInformation("Creating listener.");
+            logger.LogInformation("Creating listener on port {Port}.", settings.Port);
 
             listener = new TcpListener(IPAddress.Any, settings.Port);
             listener.Start(settings.MaxPendingConnections);

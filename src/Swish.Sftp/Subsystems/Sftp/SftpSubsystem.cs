@@ -22,6 +22,9 @@ namespace Swish.Sftp.Subsystems.Sftp
 
             packetTypes.Add(SftpPacketType.SSH_FXP_INIT, typeof(InitPacket));
             packetTypes.Add(SftpPacketType.SSH_FXP_REALPATH, typeof(RealPathPacket));
+            packetTypes.Add(SftpPacketType.SSH_FXP_OPENDIR, typeof(OpenDirPacket));
+
+            // TODO - need a way to local the file system specific to a given user
         }
 
 
@@ -84,7 +87,28 @@ namespace Swish.Sftp.Subsystems.Sftp
         {
             logger.LogDebug("Processing RealPath SFTP packet, Id={Id}, Path='{Path}'.", packet.Id, packet.Path);
 
-            // TODO - respond with an SSH_FXP_NAME packet
+            var name = new NamePacket
+            {
+                Id = packet.Id
+            };
+
+            // TODO - build the real name from the underlying file system
+            // TODO - properly set Longname
+            name.AddEntry(new NamePacket.Entry
+            {
+                Filename = "/home/swish",
+                Longname = "swish"
+            });
+
+            Send(name);
+        }
+
+
+        private void HandlePacket(OpenDirPacket packet)
+        {
+            logger.LogDebug("Processing OpenDir SFTP packet, Id={Id}, Path='{Path}'.", packet.Id, packet.Path);
+
+            // TODO - respond with SSH_FXP_HANDLE
         }
     }
 }

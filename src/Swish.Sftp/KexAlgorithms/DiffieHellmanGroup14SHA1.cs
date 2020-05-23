@@ -46,6 +46,9 @@ namespace Swish.Sftp.KexAlgorithms
         }
 
 
+        public string Name { get { return "diffie-hellman-group14-sha1"; } }
+
+
         public byte[] CreateKeyExchange()
         {
             // and computes: f = g ^ y mod p.

@@ -3,7 +3,7 @@ namespace Swish.Sftp.HostKeyAlgorithms
 {
     public interface IHostKeyAlgorithm : IAlgorithm
     {
-        void ImportKey(string keyXml);
+        void ImportKeyFromFile(string path);
         byte[] CreateKeyAndCertificatesData();
         byte[] CreateSignatureData(byte[] hash);
     }

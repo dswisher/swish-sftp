@@ -1,7 +1,8 @@
 
 using System;
+using System.IO;
 using System.Security.Cryptography;
-using System.Xml;
+using System.Text;
 
 
 namespace Swish.Sftp.HostKeyAlgorithms
@@ -35,26 +36,34 @@ namespace Swish.Sftp.HostKeyAlgorithms
             }
         }
 
-        public void ImportKey(string keyXml)
+
+        public void ImportKeyFromFile(string path)
         {
-            XmlDocument doc = new XmlDocument();
-            doc.LoadXml(keyXml);
-
-            XmlElement root = doc["RSAKeyValue"];
-
-            RSAParameters p = new RSAParameters()
+            var builder = new StringBuilder();
+            using (var reader = new StreamReader(path))
             {
-                Modulus = Convert.FromBase64String(root["Modulus"].InnerText),
-                Exponent = Convert.FromBase64String(root["Exponent"].InnerText),
-                P = Convert.FromBase64String(root["P"].InnerText),
-                Q = Convert.FromBase64String(root["Q"].InnerText),
-                DP = Convert.FromBase64String(root["DP"].InnerText),
-                DQ = Convert.FromBase64String(root["DQ"].InnerText),
-                InverseQ = Convert.FromBase64String(root["InverseQ"].InnerText),
-                D = Convert.FromBase64String(root["D"].InnerText)
-            };
+                var first = true;
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (line.StartsWith("-----", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (first)
+                        {
+                            // TODO - check for proper string
+                            first = false;
+                        }
+                    }
+                    else
+                    {
+                        builder.Append(line);
+                    }
+                }
+            }
 
-            rsa.ImportParameters(p);
+            var privateKeyBytes = Convert.FromBase64String(builder.ToString());
+
+            rsa.ImportRSAPrivateKey(privateKeyBytes, out _);
         }
     }
 }

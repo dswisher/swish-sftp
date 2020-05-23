@@ -17,6 +17,8 @@ namespace Swish.Sftp.Ciphers
             des.Mode = CipherMode.CBC;
         }
 
+        public string Name { get { return "3des-cbc"; } }
+
         // TripleDES.BlockSize is the size of the block in bits, so we need to divide by 8
         // to convert from bits to bytes.
         public uint BlockSize { get { return (uint)(des.BlockSize / 8); } }

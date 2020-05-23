@@ -44,11 +44,6 @@ namespace Swish.Sftp.Server
 
         private static IHostBuilder CreateHostBuilder(string[] args)
         {
-            var settings = new ServerSettings
-            {
-                Port = 22
-            };
-
             var builder = Host.CreateDefaultBuilder(args)
                 .UseSerilog()
                 .ConfigureServices((context, services) =>
@@ -57,7 +52,6 @@ namespace Swish.Sftp.Server
 
                     // TODO - add a .Using method to set up all the dependencies?
 
-                    services.AddSingleton<ServerSettings>(settings);
                     services.AddSingleton<ClientFactory>();
 
                     services.AddHostedService<ServerBackgroundService>();

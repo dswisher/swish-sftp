@@ -112,33 +112,11 @@ namespace Swish.Sftp
 
         public void HandlePacket(ChannelData packet)
         {
-            // TODO - if we have a subsystem, send the data there
-
             // If we have a subsystem, let it deal with the data, otherwise ignore.
             if (subsystem != null)
             {
                 subsystem.HandleData(packet.Data);
             }
-
-            /*
-            // TODO - SSH_FXP_INIT
-            if (packet.Type == 1)
-            {
-                logger.LogDebug("   -> version {Version}", packet.Version);
-
-                // TODO - clean up! This is horrible, but trying to get something working!
-                var data = new ChannelData
-                {
-                    RecipientChannel = ClientChannelId,
-                    Length = 9,
-                    FxpLength = 5,
-                    Type = 2,
-                    Version = 3
-                };
-
-                packetSender.Send(data);
-            }
-            */
         }
 
 

@@ -3,6 +3,8 @@ namespace Swish.Sftp.Compressions
 {
     public class NoCompression : ICompression
     {
+        public string Name { get { return "none"; } }
+
         public byte[] Compress(byte[] data)
         {
             return data;

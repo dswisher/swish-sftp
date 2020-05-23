@@ -23,15 +23,15 @@ namespace Swish.Sftp
 
         static KeyInfo()
         {
-            SupportedCiphers.Add(new Algo("3des-cbc", typeof(TripleDESCBC)));
+            AddAlgo<TripleDESCBC>(SupportedCiphers);
 
-            SupportedKeyExchanges.Add(new Algo("diffie-hellman-group14-sha1", typeof(DiffieHellmanGroup14SHA1)));
+            AddAlgo<DiffieHellmanGroup14SHA1>(SupportedKeyExchanges);
 
-            SupportedHostKeyAlgorithms.Add(new Algo("ssh-rsa", typeof(SSHRSA)));
+            AddAlgo<SSHRSA>(SupportedHostKeyAlgorithms);
 
-            SupportedMACAlgorithms.Add(new Algo("hmac-sha1", typeof(HMACSHA1)));
+            AddAlgo<HMACSHA1>(SupportedMACAlgorithms);
 
-            SupportedCompressions.Add(new Algo("none", typeof(NoCompression)));
+            AddAlgo<NoCompression>(SupportedCompressions);
         }
 
 
@@ -122,6 +122,16 @@ namespace Swish.Sftp
             }
 
             throw new SwishServerException(DisconnectReason.SSH_DISCONNECT_KEY_EXCHANGE_FAILED, $"Could not find a shared {direction} MAC Algorithm");
+        }
+
+
+        private static void AddAlgo<T>(List<Algo> list)
+            where T : IAlgorithm
+        {
+            // Create a temporary instance, so we can grab the name.
+            var temp = Activator.CreateInstance<T>();
+
+            list.Add(new Algo(temp.Name, typeof(T)));
         }
 
 
