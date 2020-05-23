@@ -632,6 +632,14 @@ namespace Swish.Sftp
         }
 
 
+        private void HandleSpecificPacket(Disconnect packet)
+        {
+            logger.LogDebug("Processing Disconnect packet, reason={Reason}, description='{Description}'.", packet.Reason, packet.Description);
+
+            Disconnect(DisconnectReason.None, "client disconnected");
+        }
+
+
         private void HandleSpecificPacket(ServiceRequest packet)
         {
             logger.LogDebug("Processing ServiceRequest packet, service='{Service}'.", packet.ServiceName);
@@ -732,6 +740,22 @@ namespace Swish.Sftp
         }
 
 
+        private void HandleSpecificPacket(ChannelEof packet)
+        {
+            logger.LogDebug("Processing ChannelEof packet, channel {Channel}.", packet.RecipientChannel);
+
+            DispatchToChannel(packet, packet.RecipientChannel);
+        }
+
+
+        private void HandleSpecificPacket(ChannelClose packet)
+        {
+            logger.LogDebug("Processing ChannelClose packet, channel {Channel}.", packet.RecipientChannel);
+
+            DispatchToChannel(packet, packet.RecipientChannel);
+        }
+
+
         private void HandleSpecificPacket(ChannelRequest packet)
         {
             logger.LogDebug("Processing ChannelRequest packet, channel {Channel}, request type '{Type}', want reply {Want}.", packet.RecipientChannel,
@@ -754,7 +778,21 @@ namespace Swish.Sftp
             // Look up the channel and dispatch
             if (channels.ContainsKey(channelId))
             {
-                channels[channelId].HandlePacket((dynamic)packet);
+                try
+                {
+                    channels[channelId].HandlePacket((dynamic)packet);
+                }
+                catch (RuntimeBinderException)
+                {
+                    logger.LogWarning("Unhandled channel packet type: {Type}.", packet.PacketType);
+
+                    Unimplemented unimplemented = new Unimplemented()
+                    {
+                        RejectedPacketNumber = packet.PacketSequence
+                    };
+
+                    Send(unimplemented);
+                }
             }
             else
             {

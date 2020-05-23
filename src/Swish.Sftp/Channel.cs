@@ -120,6 +120,23 @@ namespace Swish.Sftp
         }
 
 
+        public void HandlePacket(ChannelEof packet)
+        {
+            var close = new ChannelClose
+            {
+                RecipientChannel = ClientChannelId
+            };
+
+            packetSender.Send(close);
+        }
+
+
+        public void HandlePacket(ChannelClose packet)
+        {
+            // TODO - if we've already sent a close, mark the channel as ready for cleanup, otherwise send a close
+        }
+
+
         public void SendData(byte[] data)
         {
             var packet = new ChannelData
