@@ -1,6 +1,7 @@
 
 using System.Collections.Generic;
 
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Swish.Sftp.Packets;
 using Swish.Sftp.Subsystems.Sftp;
@@ -11,6 +12,7 @@ namespace Swish.Sftp
     public class Channel
     {
         private readonly IPacketSender packetSender;
+        private readonly IConfiguration config;
         private readonly ILogger logger;
 
         private readonly Dictionary<string, string> variables = new Dictionary<string, string>();
@@ -18,9 +20,10 @@ namespace Swish.Sftp
         private ISubsystem subsystem;
 
 
-        public Channel(IPacketSender packetSender, ILogger logger, uint serverChannelId, ChannelOpen packet)
+        public Channel(IPacketSender packetSender, IConfiguration config, ILogger logger, uint serverChannelId, ChannelOpen packet)
         {
             this.packetSender = packetSender;
+            this.config = config;
             this.logger = logger;
 
             ServerChannelId = serverChannelId;
@@ -78,7 +81,7 @@ namespace Swish.Sftp
                 if (packet.SubsystemName == "sftp")
                 {
                     // TODO - use a factory to create the subsystem, so we can pass in a logger and whatnot
-                    subsystem = new SftpSubsystem(this, logger);
+                    subsystem = new SftpSubsystem(this, config, logger);
 
                     ok = true;
                 }

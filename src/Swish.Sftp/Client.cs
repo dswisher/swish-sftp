@@ -25,6 +25,7 @@ namespace Swish.Sftp
 
         private readonly Socket socket;
         private readonly SftpSettings settings;
+        private readonly IConfiguration config;
         private readonly ILogger logger;
 
         private KexInit kexInitServerToClient = new KexInit();
@@ -50,6 +51,7 @@ namespace Swish.Sftp
         public Client(IConfiguration config, Socket socket, ILogger<Client> logger)
         {
             this.socket = socket;
+            this.config = config;
             this.logger = logger;
 
             Id = Interlocked.Increment(ref nextClientId).ToString();
@@ -500,6 +502,16 @@ namespace Swish.Sftp
             // Keep track of the client-to-server packet
             kexInitClientToServer = packet;
 
+            // A little logging
+            logger.LogDebug("   ...KEX algorithms: {0}", string.Join(",", packet.KexAlgorithms));
+            logger.LogDebug("   ...host key algorithms: {0}", string.Join(",", packet.ServerHostKeyAlgorithms));
+            logger.LogDebug("   ...ciphers ctos: {0}", string.Join(",", packet.EncryptionAlgorithmsClientToServer));
+            logger.LogDebug("   ...ciphers stoc: {0}", string.Join(",", packet.EncryptionAlgorithmsServerToClient));
+            logger.LogDebug("   ...MACs ctos: {0}", string.Join(",", packet.MacAlgorithmsClientToServer));
+            logger.LogDebug("   ...MACs stoc: {0}", string.Join(",", packet.MacAlgorithmsServerToClient));
+            logger.LogDebug("   ...compression ctos: {0}", string.Join(",", packet.CompressionAlgorithmsClientToServer));
+            logger.LogDebug("   ...compression stoc: {0}", string.Join(",", packet.CompressionAlgorithmsServerToClient));
+
             // Pick algorithms
             pendingExchangeContext.KexAlgorithm = KeyInfo.PickKexAlgorithm(packet.KexAlgorithms);
             pendingExchangeContext.HostKeyAlgorithm = KeyInfo.PickHostKeyAlgorithm(packet.ServerHostKeyAlgorithms);
@@ -732,7 +744,7 @@ namespace Swish.Sftp
             lock (channels)
             {
                 // TODO - use a factory to create channels, to populate logger and whatever else it might need
-                channel = new Channel(this, logger, nextChannelId++, packet);
+                channel = new Channel(this, config, logger, nextChannelId++, packet);
                 channels.Add(channel.ServerChannelId, channel);
             }
 

@@ -1,7 +1,7 @@
 
 namespace Swish.Sftp.Subsystems.Sftp.Packets
 {
-    public class OpenDirPacket : SftpPacket
+    public class OpenDirPacket : ClientToServerPacket
     {
         public override SftpPacketType PacketType { get { return SftpPacketType.SSH_FXP_OPENDIR; } }
 
@@ -12,13 +12,6 @@ namespace Swish.Sftp.Subsystems.Sftp.Packets
         {
             Id = reader.GetUInt32();
             Path = reader.GetString();
-        }
-
-
-        protected override void InternalGetBytes(ByteWriter writer)
-        {
-            // Server never sends this
-            throw new SwishServerException(DisconnectReason.SSH_DISCONNECT_PROTOCOL_ERROR, "Server should never send a SSH_FXP_INIT message");
         }
     }
 }

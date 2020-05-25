@@ -10,6 +10,24 @@ Properly implementing SSH is _hard_.
 This code is probably riddled with security vulnerabilies, so please do not use it for anything other than experimentation/learning.
 
 
+# Client Setup
+
+Right now, the server only supports limited encryption algorithms, none of which are offered by default
+by `openssh`. Until more algos are implemented, adding an entry to your `~/.ssh/config` file can help:
+
+    Host localhost
+        HostName localhost
+        User foo
+        Ciphers 3des-cbc
+        LogLevel DEBUG3
+
+Then, one can just do (assuming openssh):
+
+    sftp localhost
+
+I have tested FileZilla, and it seems to work.
+
+
 # Server Setup
 
 Requirements: the only requirement is that you have dotnet core 3.1 installed.
@@ -67,7 +85,7 @@ I'm using Serilog in the Server program.
 
 ## Links
 
-* [SFTP specs](https://wiki.filezilla-project.org/SFTP_specifications) - per FileZilla
+* [SFTP spec](https://tools.ietf.org/html/draft-ietf-secsh-filexfer-02) (IETF) - [SFTP specs](https://wiki.filezilla-project.org/SFTP_specifications) (FileZilla)
 * [RFC-4253](https://tools.ietf.org/html/rfc4253) - The Secure Shell (SSH) Transport Layer Protocol
 * Microsoft.Extensions.Configuration [deep dive](https://www.paraesthesia.com/archive/2018/06/20/microsoft-extensions-configuration-deep-dive/)
 * [Import and Export RSA Key Formats in .NET Core 3](https://vcsjones.dev/2019/10/07/key-formats-dotnet-3/)

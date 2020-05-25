@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Swish.Sftp.Packets;
@@ -20,6 +21,7 @@ namespace Swish.Sftp.Tests
         private const string Value = "some-value";
 
         private readonly Mock<IPacketSender> sender = new Mock<IPacketSender>();
+        private readonly Mock<IConfiguration> config = new Mock<IConfiguration>();
         private readonly Mock<ILogger> logger = new Mock<ILogger>();
 
         private readonly List<Packet> packets = new List<Packet>();
@@ -36,7 +38,7 @@ namespace Swish.Sftp.Tests
                 SenderChannel = ClientChannelId
             };
 
-            channel = new Channel(sender.Object, logger.Object, ServerChannelId, packet);
+            channel = new Channel(sender.Object, config.Object, logger.Object, ServerChannelId, packet);
 
             sender.Setup(x => x.Send(It.IsAny<Packet>()))
                 .Callback<Packet>(p => packets.Add(p));

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Swish.Sftp.Subsystems.Sftp.Packets;
 
@@ -15,7 +16,10 @@ namespace Swish.Sftp.Subsystems.Sftp
         private readonly Channel channel;
         private readonly ILogger logger;
 
-        public SftpSubsystem(Channel channel, ILogger logger)
+        private readonly IVirtualFileSystem fileSystem;
+
+
+        public SftpSubsystem(Channel channel, IConfiguration config, ILogger logger)
         {
             this.channel = channel;
             this.logger = logger;
@@ -23,8 +27,12 @@ namespace Swish.Sftp.Subsystems.Sftp
             packetTypes.Add(SftpPacketType.SSH_FXP_INIT, typeof(InitPacket));
             packetTypes.Add(SftpPacketType.SSH_FXP_REALPATH, typeof(RealPathPacket));
             packetTypes.Add(SftpPacketType.SSH_FXP_OPENDIR, typeof(OpenDirPacket));
+            packetTypes.Add(SftpPacketType.SSH_FXP_READDIR, typeof(ReadDirPacket));
+            packetTypes.Add(SftpPacketType.SSH_FXP_CLOSE, typeof(ClosePacket));
 
             // TODO - need a way to local the file system specific to a given user
+            // TODO - need a way to specify different file systems - like S3 and whatnot
+            fileSystem = new SimpleFileSystem(config, logger);
         }
 
 
@@ -92,12 +100,13 @@ namespace Swish.Sftp.Subsystems.Sftp
                 Id = packet.Id
             };
 
-            // TODO - build the real name from the underlying file system
-            // TODO - properly set Longname
+            // TODO - properly set Longname - need that from file system, too.
+            var realPath = fileSystem.GetRealPath(packet.Path);
+
             name.AddEntry(new NamePacket.Entry
             {
-                Filename = "/home/swish",
-                Longname = "swish"
+                Filename = realPath,
+                Longname = realPath     // TODO - fix!
             });
 
             Send(name);
@@ -108,7 +117,48 @@ namespace Swish.Sftp.Subsystems.Sftp
         {
             logger.LogDebug("Processing OpenDir SFTP packet, Id={Id}, Path='{Path}'.", packet.Id, packet.Path);
 
-            // TODO - respond with SSH_FXP_HANDLE
+            // TODO - respond with SSH_FXP_HANDLE (or SSH_FXP_STATUS if no read permission)
+            // TODO - handle should be its own class, and we need to keep a dictionary/list of them
+            var handle = new HandlePacket
+            {
+                Id = packet.Id,
+                Handle = "fred"
+            };
+
+            Send(handle);
+        }
+
+
+        private void HandlePacket(ReadDirPacket packet)
+        {
+            logger.LogDebug("Processing ReadDir SFTP packet, Id={Id}, Handle='{Handle}'.", packet.Id, packet.Handle);
+
+            // TODO - send another batch of files/dirs, or EOF if no more
+            // TODO - keep the batch small enough that we do not exceed the connection's max packet size
+            var status = new StatusPacket
+            {
+                Id = packet.Id,
+                StatusCode = 1,     // EOF - TODO - need enum!
+                ErrorMessage = "no more files"
+            };
+
+            Send(status);
+        }
+
+
+        private void HandlePacket(ClosePacket packet)
+        {
+            logger.LogDebug("Processing Close SFTP packet, Id={Id}, Handle='{Handle}'.", packet.Id, packet.Handle);
+
+            // TODO - send back the proper status - should be done by the Handle class!
+            var status = new StatusPacket
+            {
+                Id = packet.Id,
+                StatusCode = 0,     // OK - TODO - need enum!
+                ErrorMessage = "closed"
+            };
+
+            Send(status);
         }
     }
 }
