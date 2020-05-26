@@ -26,6 +26,7 @@ namespace Swish.Sftp
         private readonly Socket socket;
         private readonly SftpSettings settings;
         private readonly IConfiguration config;
+        private readonly IChannelFactory channelFactory;
         private readonly ILogger logger;
 
         private KexInit kexInitServerToClient = new KexInit();
@@ -48,10 +49,11 @@ namespace Swish.Sftp
         private byte[] sessionId;
 
 
-        public Client(IConfiguration config, Socket socket, ILogger<Client> logger)
+        public Client(IConfiguration config, Socket socket, IChannelFactory channelFactory, ILogger<Client> logger)
         {
             this.socket = socket;
             this.config = config;
+            this.channelFactory = channelFactory;
             this.logger = logger;
 
             Id = Interlocked.Increment(ref nextClientId).ToString();
@@ -744,7 +746,7 @@ namespace Swish.Sftp
             lock (channels)
             {
                 // TODO - use a factory to create channels, to populate logger and whatever else it might need
-                channel = new Channel(this, config, logger, nextChannelId++, packet);
+                channel = channelFactory.Create(this, packet, nextChannelId++);
                 channels.Add(channel.ServerChannelId, channel);
             }
 

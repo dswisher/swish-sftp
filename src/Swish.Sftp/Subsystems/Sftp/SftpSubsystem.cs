@@ -1,15 +1,16 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
-using Microsoft.Extensions.Configuration;
+using Microsoft.CSharp.RuntimeBinder;
 using Microsoft.Extensions.Logging;
 using Swish.Sftp.Subsystems.Sftp.Packets;
 
 
 namespace Swish.Sftp.Subsystems.Sftp
 {
-    public class SftpSubsystem : ISubsystem
+    public class SftpSubsystem : ISftpSubsystem
     {
         private readonly Dictionary<SftpPacketType, Type> packetTypes = new Dictionary<SftpPacketType, Type>();
 
@@ -17,9 +18,12 @@ namespace Swish.Sftp.Subsystems.Sftp
         private readonly ILogger logger;
 
         private readonly IVirtualFileSystem fileSystem;
+        private readonly Dictionary<string, SftpHandle> handles = new Dictionary<string, SftpHandle>();
+
+        private int nextChannelId = 1;
 
 
-        public SftpSubsystem(Channel channel, IConfiguration config, ILogger logger)
+        public SftpSubsystem(Channel channel, IVirtualFileSystemFactory fileSystemFactory, ILogger logger)
         {
             this.channel = channel;
             this.logger = logger;
@@ -30,9 +34,7 @@ namespace Swish.Sftp.Subsystems.Sftp
             packetTypes.Add(SftpPacketType.SSH_FXP_READDIR, typeof(ReadDirPacket));
             packetTypes.Add(SftpPacketType.SSH_FXP_CLOSE, typeof(ClosePacket));
 
-            // TODO - need a way to local the file system specific to a given user
-            // TODO - need a way to specify different file systems - like S3 and whatnot
-            fileSystem = new SimpleFileSystem(config, logger);
+            fileSystem = fileSystemFactory.Create();
         }
 
 
@@ -55,7 +57,7 @@ namespace Swish.Sftp.Subsystems.Sftp
                     {
                         HandlePacket((dynamic)packet);
                     }
-                    catch
+                    catch (RuntimeBinderException)
                     {
                         logger.LogWarning("Unhandled SFTP packet type: {Type}.", type);
                     }
@@ -68,12 +70,37 @@ namespace Swish.Sftp.Subsystems.Sftp
         }
 
 
-        private void Send(SftpPacket packet)
+        public void Send(SftpPacket packet)
         {
-            logger.LogDebug("Sending SFTP {Type} packet.", packet.PacketType);
+            logger.LogDebug("Sending SFTP {Type} packet. {Details}", packet.PacketType, packet.Details());
 
             // TODO - too much copying of bytes down inside here!
             channel.SendData(packet.GetBytes());
+        }
+
+
+        private bool TryGetHandle(uint requestId, string name, out SftpHandle handle)
+        {
+            if (handles.ContainsKey(name))
+            {
+                handle = handles[name];
+                return true;
+            }
+            else
+            {
+                handle = null;
+
+                var status = new StatusPacket
+                {
+                    Id = requestId,
+                    StatusCode = StatusPacket.Failure,
+                    ErrorMessage = "unknown channel"
+                };
+
+                Send(status);
+
+                return false;
+            }
         }
 
 
@@ -117,15 +144,37 @@ namespace Swish.Sftp.Subsystems.Sftp
         {
             logger.LogDebug("Processing OpenDir SFTP packet, Id={Id}, Path='{Path}'.", packet.Id, packet.Path);
 
-            // TODO - respond with SSH_FXP_HANDLE (or SSH_FXP_STATUS if no read permission)
-            // TODO - handle should be its own class, and we need to keep a dictionary/list of them
-            var handle = new HandlePacket
+            // If they cannot read the directory, respond with a status packet.
+            if (!fileSystem.CanReadDirectory(packet.Path))
             {
-                Id = packet.Id,
-                Handle = "fred"
-            };
+                var status = new StatusPacket
+                {
+                    Id = packet.Id,
+                    StatusCode = StatusPacket.PermissionDenied,
+                    ErrorMessage = "permission denied"
+                };
 
-            Send(handle);
+                Send(status);
+            }
+            else
+            {
+                // Create a new channel
+                // TODO - use a factory to create the handle, so it can get its own logger
+                var handleId = Interlocked.Increment(ref nextChannelId).ToString();
+                var handle = new SftpHandle(this, handleId, fileSystem, logger);
+
+                handles.Add(handleId, handle);
+
+                handle.OpenDir(packet.Path);
+
+                var response = new HandlePacket
+                {
+                    Id = packet.Id,
+                    Handle = handle.Name
+                };
+
+                Send(response);
+            }
         }
 
 
@@ -133,16 +182,10 @@ namespace Swish.Sftp.Subsystems.Sftp
         {
             logger.LogDebug("Processing ReadDir SFTP packet, Id={Id}, Handle='{Handle}'.", packet.Id, packet.Handle);
 
-            // TODO - send another batch of files/dirs, or EOF if no more
-            // TODO - keep the batch small enough that we do not exceed the connection's max packet size
-            var status = new StatusPacket
+            if (TryGetHandle(packet.Id, packet.Handle, out SftpHandle handle))
             {
-                Id = packet.Id,
-                StatusCode = 1,     // EOF - TODO - need enum!
-                ErrorMessage = "no more files"
-            };
-
-            Send(status);
+                handle.ReadDir(packet.Id);
+            }
         }
 
 
@@ -150,15 +193,19 @@ namespace Swish.Sftp.Subsystems.Sftp
         {
             logger.LogDebug("Processing Close SFTP packet, Id={Id}, Handle='{Handle}'.", packet.Id, packet.Handle);
 
-            // TODO - send back the proper status - should be done by the Handle class!
-            var status = new StatusPacket
+            if (TryGetHandle(packet.Id, packet.Handle, out SftpHandle handle))
             {
-                Id = packet.Id,
-                StatusCode = 0,     // OK - TODO - need enum!
-                ErrorMessage = "closed"
-            };
+                handles.Remove(packet.Handle);
 
-            Send(status);
+                var status = new StatusPacket
+                {
+                    Id = packet.Id,
+                    StatusCode = StatusPacket.Ok,
+                    ErrorMessage = "closed"
+                };
+
+                Send(status);
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ namespace Swish.Sftp
     {
         private readonly IPacketSender packetSender;
         private readonly IConfiguration config;
+        private readonly IVirtualFileSystemFactory fileSystemFactory;
         private readonly ILogger logger;
 
         private readonly Dictionary<string, string> variables = new Dictionary<string, string>();
@@ -20,10 +21,11 @@ namespace Swish.Sftp
         private ISubsystem subsystem;
 
 
-        public Channel(IPacketSender packetSender, IConfiguration config, ILogger logger, uint serverChannelId, ChannelOpen packet)
+        public Channel(IPacketSender packetSender, IConfiguration config, IVirtualFileSystemFactory fileSystemFactory, ILogger logger, uint serverChannelId, ChannelOpen packet)
         {
             this.packetSender = packetSender;
             this.config = config;
+            this.fileSystemFactory = fileSystemFactory;
             this.logger = logger;
 
             ServerChannelId = serverChannelId;
@@ -81,7 +83,7 @@ namespace Swish.Sftp
                 if (packet.SubsystemName == "sftp")
                 {
                     // TODO - use a factory to create the subsystem, so we can pass in a logger and whatnot
-                    subsystem = new SftpSubsystem(this, config, logger);
+                    subsystem = new SftpSubsystem(this, fileSystemFactory, logger);
 
                     ok = true;
                 }

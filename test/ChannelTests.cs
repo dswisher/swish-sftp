@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Swish.Sftp.Packets;
+using Swish.Sftp.Subsystems.Sftp;
 using Xunit;
 
 namespace Swish.Sftp.Tests
@@ -22,6 +23,7 @@ namespace Swish.Sftp.Tests
 
         private readonly Mock<IPacketSender> sender = new Mock<IPacketSender>();
         private readonly Mock<IConfiguration> config = new Mock<IConfiguration>();
+        private readonly Mock<IVirtualFileSystemFactory> vfs = new Mock<IVirtualFileSystemFactory>();
         private readonly Mock<ILogger> logger = new Mock<ILogger>();
 
         private readonly List<Packet> packets = new List<Packet>();
@@ -38,7 +40,7 @@ namespace Swish.Sftp.Tests
                 SenderChannel = ClientChannelId
             };
 
-            channel = new Channel(sender.Object, config.Object, logger.Object, ServerChannelId, packet);
+            channel = new Channel(sender.Object, config.Object, vfs.Object, logger.Object, ServerChannelId, packet);
 
             sender.Setup(x => x.Send(It.IsAny<Packet>()))
                 .Callback<Packet>(p => packets.Add(p));

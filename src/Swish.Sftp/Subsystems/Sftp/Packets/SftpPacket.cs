@@ -1,4 +1,8 @@
 
+using System.Collections.Generic;
+using System.Linq;
+
+
 namespace Swish.Sftp.Subsystems.Sftp.Packets
 {
     public abstract class SftpPacket
@@ -30,7 +34,21 @@ namespace Swish.Sftp.Subsystems.Sftp.Packets
         }
 
 
+        public string Details()
+        {
+            return string.Join(", ", InternalGetDetails());
+        }
+
+
         public abstract void Load(ByteReader reader);
+
+
+        protected virtual IEnumerable<string> InternalGetDetails()
+        {
+            return Enumerable.Empty<string>();
+        }
+
+
         protected abstract void InternalGetBytes(ByteWriter writer);
     }
 }

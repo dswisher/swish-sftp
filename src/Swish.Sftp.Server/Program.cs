@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
-
+using Swish.Sftp.Subsystems.Sftp;
 
 namespace Swish.Sftp.Server
 {
@@ -53,6 +53,8 @@ namespace Swish.Sftp.Server
                     // TODO - add a .Using method to set up all the dependencies?
 
                     services.AddSingleton<ClientFactory>();
+                    services.AddSingleton<IChannelFactory, ChannelFactory>();
+                    services.AddSingleton<IVirtualFileSystemFactory, VirtualFileSystemFactory>();
 
                     services.AddHostedService<ServerBackgroundService>();
                 });
